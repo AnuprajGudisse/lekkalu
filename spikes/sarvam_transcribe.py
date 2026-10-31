@@ -1,4 +1,5 @@
-"""Day 1 Sarvam spike: Telugu transcript + English translation for one audio file.
+# Copyright (c) 2026 Lekkalu
+"""Sarvam spike: Telugu transcript + English translation for one audio file.
 
 Usage: uv run --env-file .env spikes/sarvam_transcribe.py [audio_path]
 Without a path, a synthetic Telugu sample is generated with TTS first.

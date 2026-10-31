@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Lekkalu
 """Load the project's env file into os.environ for spike scripts (no python-dotenv needed)."""
 import os
 from pathlib import Path

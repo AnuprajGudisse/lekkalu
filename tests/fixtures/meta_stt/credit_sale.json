@@ -1,0 +1,13 @@
+{
+  "sessionId": "voyager/transcribe/C699BEDDFC204FE187F1A1EAF026A32A",
+  "transcript": "లక్ష్మీ రెండు ndు చీరలు తీసుకుంది, రెండు రెండు వేల ఐదువందలు. తర్వాత ఇస్తుంది",
+  "audioDurationMs": 4880,
+  "turns": [
+    {
+      "turnId": 0,
+      "startMs": 0,
+      "endMs": 4380,
+      "transcript": "లక్ష్మీ రెండు ndు చీరలు తీసుకుంది, రెండు రెండు వేల ఐదువందలు. తర్వాత ఇస్తుంది"
+    }
+  ]
+}

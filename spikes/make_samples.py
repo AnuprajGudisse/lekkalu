@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Lekkalu
 """Generate synthetic Telugu voice notes with Sarvam TTS, plus their labels.
 
 Usage: uv run --no-project python spikes/make_samples.py

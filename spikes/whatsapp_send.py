@@ -1,4 +1,5 @@
-"""Day 1 WhatsApp spike: send one message to TEST_RECIPIENT_NUMBER.
+# Copyright (c) 2026 Lekkalu
+"""WhatsApp spike: send one message to TEST_RECIPIENT_NUMBER.
 
 Usage: uv run --no-project --env-file .env python spikes/whatsapp_send.py ["text"]
 Free-form text only works inside the 24-hour window (after the recipient messages

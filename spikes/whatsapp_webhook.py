@@ -1,9 +1,10 @@
-"""Day 1 WhatsApp spike: minimal webhook receiver.
+# Copyright (c) 2026 Lekkalu
+"""WhatsApp spike: minimal webhook receiver.
 
 Usage: uv run --no-project --env-file .env python spikes/whatsapp_webhook.py
 Then: cloudflared tunnel --url http://localhost:8001
 Register https://<tunnel>/webhook with WHATSAPP_VERIFY_TOKEN and subscribe to "messages".
-Signature verification is Day 3 work; this spike only captures payloads.
+Signature verification belongs in the app; this spike only captures payloads.
 """
 import json
 import os

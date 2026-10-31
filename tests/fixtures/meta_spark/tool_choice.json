@@ -1,0 +1,28 @@
+[
+  {
+    "question": "ఎవరెవరు డబ్బులు ఇవ్వాలి?",
+    "tool": "balances",
+    "args": {},
+    "ok": true,
+    "text": null,
+    "latency_s": 1.97
+  },
+  {
+    "question": "లక్ష్మి ఎంత ఇవ్వాలి?",
+    "tool": "customer_balance",
+    "args": {
+      "customer_name": "లక్ష్మి"
+    },
+    "ok": true,
+    "text": null,
+    "latency_s": 11.06
+  },
+  {
+    "question": "ఈ రోజు వాతావరణం ఎలా ఉంది?",
+    "tool": null,
+    "args": null,
+    "ok": true,
+    "text": "నాకు తెలియదు.",
+    "latency_s": 3.17
+  }
+]

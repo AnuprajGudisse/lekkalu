@@ -1,0 +1,5 @@
+{
+  "input": "లక్ష్మీ రెండు ndు చీరలు తీసుకుంది, రెండు రెండు వేల ఐదువందలు. తర్వాత ఇస్తుంది",
+  "content": "{\"amount_rupees\": 2500, \"customer_name\": \"లక్ష్మీ\", \"intent\": \"credit_sale\", \"item\": \"చీరలు\", \"missing_fields\": [], \"profit_rupees\": null, \"quantity\": 2}",
+  "finish": "stop"
+}
