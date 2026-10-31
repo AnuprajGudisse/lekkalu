@@ -1,0 +1,126 @@
+[
+  {
+    "id": "01_sale_profit",
+    "source": "synthetic_tts",
+    "audio": "var/samples/01_sale_profit.wav",
+    "reference_text": "ఒక ఎర్ర చీర వెయ్యి రూపాయలకు అమ్మాను, రెండు వందలు లాభం.",
+    "expected": {
+      "intent": "sale",
+      "amount_rupees": 1000,
+      "profit_rupees": 200,
+      "quantity": 1,
+      "item": "ఎర్ర చీర",
+      "customer": null
+    }
+  },
+  {
+    "id": "02_credit_sale",
+    "source": "synthetic_tts",
+    "audio": "var/samples/02_credit_sale.wav",
+    "reference_text": "లక్ష్మి రెండు చీరలు తీసుకుంది, రెండు వేల ఐదు వందలు, తర్వాత ఇస్తుంది.",
+    "expected": {
+      "intent": "credit_sale",
+      "amount_rupees": 2500,
+      "quantity": 2,
+      "item": "చీర",
+      "customer": "లక్ష్మి"
+    }
+  },
+  {
+    "id": "03_repayment",
+    "source": "synthetic_tts",
+    "audio": "var/samples/03_repayment.wav",
+    "reference_text": "లక్ష్మి వెయ్యి రూపాయలు ఇచ్చింది.",
+    "expected": {
+      "intent": "payment_received",
+      "amount_rupees": 1000,
+      "customer": "లక్ష్మి"
+    }
+  },
+  {
+    "id": "04_purchase",
+    "source": "synthetic_tts",
+    "audio": "var/samples/04_purchase.wav",
+    "reference_text": "హోల్‌సేల్ దగ్గర పది చీరలు కొన్నాను, పదిహేను వేలు అయింది.",
+    "expected": {
+      "intent": "purchase",
+      "amount_rupees": 15000,
+      "quantity": 10,
+      "item": "చీర",
+      "customer": null
+    }
+  },
+  {
+    "id": "05_expense",
+    "source": "synthetic_tts",
+    "audio": "var/samples/05_expense.wav",
+    "reference_text": "ఆటోకి నూట యాభై రూపాయలు ఖర్చు అయింది.",
+    "expected": {
+      "intent": "expense",
+      "amount_rupees": 150,
+      "item": "ఆటో",
+      "customer": null
+    }
+  },
+  {
+    "id": "06_credit_codemix",
+    "source": "synthetic_tts",
+    "audio": "var/samples/06_credit_codemix.wav",
+    "reference_text": "సుజాత ఒక silk saree తీసుకుంది, three thousand rupees, అప్పు రాసుకో.",
+    "expected": {
+      "intent": "credit_sale",
+      "amount_rupees": 3000,
+      "quantity": 1,
+      "item": "silk saree",
+      "customer": "సుజాత"
+    }
+  },
+  {
+    "id": "07_sale_paatika",
+    "source": "synthetic_tts",
+    "audio": "var/samples/07_sale_paatika.wav",
+    "reference_text": "రెండు కాటన్ చీరలు పాతిక వందలకు అమ్మాను.",
+    "expected": {
+      "intent": "sale",
+      "amount_rupees": 2500,
+      "quantity": 2,
+      "item": "కాటన్ చీర",
+      "customer": null
+    }
+  },
+  {
+    "id": "08_missing_amount",
+    "source": "synthetic_tts",
+    "audio": "var/samples/08_missing_amount.wav",
+    "reference_text": "పద్మ ఒక చీర తీసుకుంది, డబ్బులు తర్వాత ఇస్తుంది.",
+    "expected": {
+      "intent": "credit_sale",
+      "amount_rupees": null,
+      "quantity": 1,
+      "item": "చీర",
+      "customer": "పద్మ"
+    }
+  },
+  {
+    "id": "09_correction",
+    "source": "synthetic_tts",
+    "audio": "var/samples/09_correction.wav",
+    "reference_text": "తప్పు, ఇందాక చెప్పింది రెండు వేలు కాదు, పదిహేను వందలు.",
+    "expected": {
+      "intent": "correction",
+      "amount_rupees": 1500,
+      "customer": null
+    }
+  },
+  {
+    "id": "10_query_owed",
+    "source": "synthetic_tts",
+    "audio": "var/samples/10_query_owed.wav",
+    "reference_text": "ఎవరెవరు డబ్బులు ఇవ్వాలి?",
+    "expected": {
+      "intent": "query",
+      "amount_rupees": null,
+      "customer": null
+    }
+  }
+]
