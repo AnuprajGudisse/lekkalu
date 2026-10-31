@@ -19,3 +19,9 @@ class Base(DeclarativeBase):
             "pk": "pk_%(table_name)s",
         }
     )
+
+
+def get_session():
+    # SessionLocal is looked up at call time so tests can bind it to their rolled-back connection.
+    with SessionLocal() as session:
+        yield session

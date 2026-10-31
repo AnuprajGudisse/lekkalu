@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="te">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7a1f3d">
+<link rel="manifest" href="/static/manifest.json">
+<title>లెక్కలు · Lekkalu</title>
+<style>
+  :root { --brand: #7a1f3d; --bg: #f7f3ee; --me: #fde8d0; --bot: #ffffff; --muted: #6b6b6b; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Noto Sans Telugu", "Nirmala UI", system-ui, sans-serif;
+    font-size: 18px; line-height: 1.5; background: var(--bg); color: #1d1d1d;
+    display: flex; flex-direction: column;
+  }
+  header { background: var(--brand); color: #fff; padding: 12px 16px; font-size: 20px; font-weight: 600; }
+  #log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .bubble { max-width: 85%; padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; word-wrap: break-word; }
+  .me { align-self: flex-end; background: var(--me); border-bottom-right-radius: 4px; }
+  .bot { align-self: flex-start; background: var(--bot); border-bottom-left-radius: 4px; box-shadow: 0 1px 2px #0001; }
+  .wait { color: var(--muted); font-style: italic; }
+  .unsent { opacity: .6; }
+  .error { align-self: flex-end; color: #a40000; font-size: 15px; }
+  form { display: flex; gap: 8px; padding: 8px; padding-bottom: max(8px, env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid #0001; }
+  textarea { flex: 1; resize: none; font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 20px; max-height: 120px; }
+  button { border: 0; border-radius: 50%; width: 48px; height: 48px; font-size: 22px; background: var(--brand); color: #fff; }
+  button:disabled { background: #bbb; }
+</style>
+</head>
+<body>
+<header>లెక్కలు</header>
+<main id="log" aria-live="polite"></main>
+<form id="form">
+  <textarea id="text" rows="1" maxlength="1000" placeholder="ఇక్కడ రాయండి…" aria-label="సందేశం"></textarea>
+  <button type="button" id="mic" disabled title="త్వరలో" aria-label="వాయిస్ (త్వరలో)">🎤</button>
+  <button type="submit" id="send" aria-label="పంపు">➤</button>
+</form>
+<script>
+const slug = location.pathname.split("/")[2];
+const token = new URLSearchParams(location.search).get("t");
+const api = `/api/${slug}/messages`;
+const headers = { "Content-Type": "application/json", ...(token ? { "X-Access-Token": token } : {}) };
+const log = document.getElementById("log");
+const entries = new Map();  // client_message_id -> {id, body, reply_text, sent, rejected}
+const timeout = () => AbortSignal.timeout(10000);
+
+function uuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));  // plain-HTTP fallback
+  b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+  const h = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function bubble(cls, text) {
+  const div = document.createElement("div");
+  div.className = `bubble ${cls}`;
+  div.textContent = text;
+  return div;
+}
+
+function render() {
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.replaceChildren();
+  for (const e of entries.values()) {
+    log.append(bubble(e.sent ? "me" : "me unsent", e.body));
+    if (e.rejected) log.append(bubble("error", "పంపలేకపోయాను. పేజీ లింక్ సరిచూడండి."));
+    else log.append(e.reply_text ? bubble("bot", e.reply_text) : bubble("bot wait", "…"));
+  }
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function merge(rows) {
+  for (const m of rows) {
+    entries.set(m.client_message_id, { id: m.id, body: m.body, reply_text: m.reply_text, sent: true });
+  }
+}
+
+async function send(cid) {
+  const e = entries.get(cid);
+  try {
+    const r = await fetch(api, { method: "POST", headers, signal: timeout(),
+                                 body: JSON.stringify({ client_message_id: cid, text: e.body }) });
+    if (r.status >= 400 && r.status < 500) { e.rejected = true; render(); return; }  // resending won't help
+    if (!r.ok) throw new Error(r.status);
+    e.id = (await r.json()).id;
+    e.sent = true;
+  } catch { /* network or 5xx: retried by poll() with the same id, so the server never stores it twice */ }
+  render();
+}
+
+async function poll() {
+  for (const [cid, e] of entries) if (!e.sent && !e.rejected) await send(cid);
+  const ids = [...entries.values()].filter(e => e.id);
+  const waiting = ids.filter(e => !e.reply_text).map(e => e.id);
+  const after = waiting.length ? Math.min(...waiting) - 1 : Math.max(0, ...ids.map(e => e.id));
+  try {
+    const r = await fetch(`${api}?after=${after}`, { headers, signal: timeout() });
+    if (r.ok) { merge(await r.json()); render(); }
+  } catch { /* offline; next tick */ }
+}
+
+document.getElementById("form").addEventListener("submit", ev => {
+  ev.preventDefault();
+  const input = document.getElementById("text");
+  const body = input.value.trim();
+  if (!body) return;
+  const cid = uuid();
+  entries.set(cid, { id: null, body, reply_text: null, sent: false });
+  input.value = "";
+  render();
+  send(cid);
+});
+
+document.getElementById("text").addEventListener("keydown", ev => {
+  if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); document.getElementById("form").requestSubmit(); }
+});
+
+(async () => {
+  try {
+    const r = await fetch(api, { headers, signal: timeout() });
+    if (r.ok) merge(await r.json());
+  } catch { /* first poll() fills it in */ }
+  render();
+  log.scrollTop = log.scrollHeight;
+  setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>

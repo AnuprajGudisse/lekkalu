@@ -11,8 +11,9 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
+from app.core import database
 from app.core.config import get_settings
 from app.core.models import Business
 from app.customers.models import Customer
@@ -50,6 +51,14 @@ def session(engine):
         finally:
             s.close()
             outer.rollback()
+
+
+@pytest.fixture
+def db(session, monkeypatch):
+    """Point app code (pipeline, API) at the test connection; its commits become savepoint releases."""
+    factory = sessionmaker(bind=session.connection(), join_transaction_mode="create_savepoint", expire_on_commit=False)
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    return factory
 
 
 def make_business(session: Session, *, public: bool = False, **kw) -> Business:
