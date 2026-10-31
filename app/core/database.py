@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Lekkalu
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.core.config import get_settings
@@ -9,4 +9,13 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
-    pass
+    # Fixed constraint names: services match on them, and migrations stay deterministic.
+    metadata = MetaData(
+        naming_convention={
+            "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+            "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+            "ck": "ck_%(table_name)s_%(constraint_name)s",
+            "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
+            "pk": "pk_%(table_name)s",
+        }
+    )
