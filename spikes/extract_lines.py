@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from app.ai.providers.meta import MetaExtractor  # noqa: E402
-from app.ai.schemas import Extraction  # noqa: E402
+from app.ai.schemas import Extraction, to_paise  # noqa: E402
+from app.speech.numbers_te import parse_amount  # noqa: E402
 
 CASES = {
     "credit_sale": "లక్ష్మి రెండు చీరలు తీసుకుంది, రెండు వేల ఐదు వందలు, తర్వాత ఇస్తుంది",
@@ -21,9 +22,22 @@ CASES = {
     "sale_profit": "ఒక ఎర్ర చీర వెయ్యి రూపాయలకు అమ్మాను, రెండు వందలు లాభం.",
 }
 
+# Phase 3 gate: the spike's reference and Muse transcripts, to check that amount_words parses to amount_rupees.
+TRANSCRIPTS = ROOT / "spikes" / "out" / "stt" / "transcripts.json"
+if TRANSCRIPTS.exists():
+    for sample, row in json.loads(TRANSCRIPTS.read_text()).items():
+        for source in ("reference", "muse"):
+            CASES[f"gate_{sample}_{source}"] = row[source]
+
+
+def squash(s: str) -> str:
+    return "".join(s.split()).replace("‌", "")
+
+
 out = ROOT / "spikes" / "out" / "lines"
 out.mkdir(parents=True, exist_ok=True)
 ext = MetaExtractor()
+agree = with_amount = 0
 for name, text in CASES.items():
     start = time.perf_counter()
     try:
@@ -37,3 +51,16 @@ for name, text in CASES.items():
     print(f"{name} [{elapsed}s] {len(lines)} line(s)")
     for line in lines:
         print("   ", line.model_dump_json())
+        if line.amount_rupees is None:
+            continue
+        with_amount += 1
+        try:
+            model = to_paise(line.amount_rupees)
+        except Exception:
+            model = None
+        parsed = parse_amount(line.amount_words)
+        agree += parsed == model
+        grounded = bool(line.amount_words) and squash(line.amount_words) in squash(text)
+        print(f"    GATE model={model} words={line.amount_words!r} parsed={parsed} "
+              f"{'AGREE' if parsed == model else 'ASK'} grounded={grounded}")
+print(f"\nGATE: {agree}/{with_amount} lines with an amount agree")

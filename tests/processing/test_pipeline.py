@@ -1,7 +1,9 @@
 # Copyright (c) 2026 Lekkalu
+import json
 import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
@@ -14,13 +16,17 @@ from app.ledger.models import Transaction
 from app.messaging import templates_te as t
 from app.messaging.models import Message
 from app.processing import pipeline
+from app.speech import audio
+from app.speech.providers.mock import MockTranscriber
 from tests.conftest import make_business, make_message
 
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "meta_spark"
 CREDIT_TEXT = "లక్ష్మి రెండు చీరలు తీసుకుంది, రెండు వేల ఐదు వందలు, తర్వాత ఇస్తుంది"
 
 
 def line(intent="credit_sale", amount=None, name="Lakshmi", native="లక్ష్మి", **kw) -> Line:
-    fields = dict(intent=intent, amount_rupees=None if amount is None else Decimal(amount), profit_rupees=None,
+    fields = dict(intent=intent, amount_rupees=None if amount is None else Decimal(amount), amount_words=amount,
+                  profit_rupees=None,
                   quantity=None, item=None, item_native=None, customer_name=name, customer_name_native=native,
                   missing_fields=[])
     return Line(**(fields | kw))
@@ -175,6 +181,28 @@ def test_unusable_amounts_ask_again_and_record_nothing(session, shop, lakshmi, e
     assert (msg.status, msg.reply_text) == ("done", f"[MOCK] {t.ASK_AMOUNT}")
 
 
+@pytest.mark.parametrize(
+    "words",
+    ["రెండు వేలు", "పదిహేనుంహేనువేలు", None],
+    ids=["words_say_another_amount", "garbled_words", "no_words"],
+)
+def test_amount_the_quoted_words_do_not_confirm_is_asked_not_recorded(session, shop, lakshmi, extract, words):
+    extract("unclear", line(amount="2500", amount_words=words))
+    msg = send(session, shop, "unclear")
+    pipeline.process_business(shop.id)
+    assert transactions(session, shop) == []
+    msg = refreshed(session, msg)
+    assert (msg.status, msg.reply_text) == ("done", f"[MOCK] {t.ASK_AMOUNT_UNCLEAR}")
+
+
+def test_spoken_amount_words_confirm_the_model_amount(session, shop, lakshmi, extract):
+    extract("spoken", line(amount="2500", amount_words="రెండు రెండు వేల ఐదువందలు"))  # real Muse STT noise
+    send(session, shop, "spoken")
+    pipeline.process_business(shop.id)
+    [tx] = transactions(session, shop)
+    assert tx.amount_paise == 250000
+
+
 def test_zero_profit_means_cost_equals_amount(session, shop, extract):
     extract("sale", line(intent="sale", amount="1000", profit_rupees=Decimal("0"), name=None, native=None))
     send(session, shop, "sale")
@@ -220,3 +248,81 @@ def test_extractor_failure_marks_failed_and_next_message_still_runs(session, sho
     assert "TimeoutError" in failed.error
     assert refreshed(session, ok).status == "done"
     assert session.scalar(select(func.count()).select_from(Transaction).where(Transaction.business_id == shop.id)) == 1
+
+
+# --- voice notes ---
+
+MUSE_TRANSCRIPT = "లక్ష్మీ రెండు ndు చీరలు తీసుకుంది, రెండు రెండు వేల ఐదువందలు. తర్వాత ఇస్తుంది"  # recorded Muse output
+
+
+@pytest.fixture
+def transcribe(monkeypatch):
+    """Replace ffmpeg and Muse Voice Transcribe; returns the mock so tests can set text and count calls."""
+    mock = MockTranscriber(MUSE_TRANSCRIPT)
+    monkeypatch.setattr(pipeline, "get_transcriber", lambda: mock)
+    monkeypatch.setattr(audio, "to_wav", lambda path: b"RIFF")
+    return mock
+
+
+def voice(session, shop, **kw):
+    return make_message(session, shop, kind="audio", body=None, audio_path="1/note.audio", **kw)
+
+
+def test_voice_note_is_transcribed_and_recorded_like_text(session, shop, lakshmi, extract, transcribe):
+    extract(MUSE_TRANSCRIPT, line(amount="2500", amount_words="రెండు రెండు వేల ఐదువందలు"))
+    msg = voice(session, shop)
+    pipeline.process_business(shop.id)
+
+    [tx] = transactions(session, shop)
+    assert (tx.type, tx.amount_paise, tx.customer_id) == ("credit_sale", 250000, lakshmi.id)
+    msg = refreshed(session, msg)
+    assert msg.transcript_te == MUSE_TRANSCRIPT
+    assert msg.reply_text.startswith("[MOCK] ") and "₹2,500" in msg.reply_text and "లక్ష్మి" in msg.reply_text
+
+
+def test_transcript_saved_before_restart_is_not_transcribed_again(session, shop, lakshmi, extract, transcribe):
+    extract("saved", line(amount="2500"))
+    voice(session, shop, transcript_te="saved", status="processing")  # transcribed, then the process died
+    pipeline.recover()
+    pipeline.process_business(shop.id)
+    assert transcribe.calls == 0
+    assert len(transactions(session, shop)) == 1
+
+
+@pytest.mark.parametrize("heard", ["", "   "])
+def test_silent_voice_note_asks_again_without_calling_the_extractor(session, shop, transcribe, monkeypatch, heard):
+    transcribe.text = heard
+    monkeypatch.setattr(pipeline, "get_extractor", lambda: pytest.fail("extractor called"))
+    msg = voice(session, shop)
+    pipeline.process_business(shop.id)
+    assert transactions(session, shop) == []
+    msg = refreshed(session, msg)
+    assert (msg.status, msg.reply_text) == ("done", f"[MOCK] {t.NOT_UNDERSTOOD}")
+
+
+def test_transcription_failure_marks_failed_and_next_message_still_runs(session, shop, lakshmi, extract,
+                                                                         transcribe, monkeypatch):
+    def broken(path):
+        raise RuntimeError("ffmpeg died")
+    monkeypatch.setattr(audio, "to_wav", broken)
+    extract(CREDIT_TEXT, line(amount="2500"))
+    bad = voice(session, shop, received_at=datetime.now(UTC) - timedelta(seconds=1))
+    good = send(session, shop, CREDIT_TEXT)
+    pipeline.process_business(shop.id)
+
+    bad, good = refreshed(session, bad), refreshed(session, good)
+    assert (bad.status, bad.reply_text) == ("failed", f"[MOCK] {t.SEND_AGAIN}")
+    assert "RuntimeError" in bad.error
+    assert good.status == "done"
+    assert len(transactions(session, shop)) == 1
+
+
+def test_recorded_muse_spark_extraction_goes_through_routing(session, shop, lakshmi, monkeypatch):
+    """The real response (amount_words included), not a hand-built Line, decides the entry."""
+    recorded = json.loads((FIXTURES / "extraction_lines_credit_sale.json").read_text())
+    extraction = Extraction.model_validate_json(recorded["content"])
+    monkeypatch.setattr(pipeline, "get_extractor", lambda: MockExtractor({recorded["input"]: extraction}))
+    send(session, shop, recorded["input"])
+    pipeline.process_business(shop.id)
+    [tx] = transactions(session, shop)
+    assert (tx.type, tx.amount_paise, tx.customer_id, tx.quantity) == ("credit_sale", 250000, lakshmi.id, 2)

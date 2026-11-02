@@ -8,6 +8,7 @@ import pytest
 
 from app.ai.providers.meta import MetaExtractor
 from app.ai.schemas import ExtractionError, to_paise
+from app.speech.numbers_te import parse_amount
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "meta_spark"
 
@@ -26,6 +27,7 @@ def test_meta_extractor_parses_recorded_credit_sale():
     [line] = MetaExtractor(client=stub_client(recorded("credit_sale"))).extract("ignored").lines
     assert line.intent == "credit_sale"
     assert to_paise(line.amount_rupees) == 250000
+    assert parse_amount(line.amount_words) == 250000  # the words agree with the number
     assert (line.customer_name, line.customer_name_native) == ("Lakshmi", "లక్ష్మి")
     assert line.quantity == 2
 

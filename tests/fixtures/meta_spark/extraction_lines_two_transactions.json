@@ -1,4 +1,4 @@
 {
   "input": "రెండు చీరలు అమ్మా, ఆటోకి 150",
-  "content": "{\"lines\": [{\"amount_rupees\": null, \"customer_name\": null, \"customer_name_native\": null, \"intent\": \"sale\", \"item\": \"saree\", \"item_native\": \"చీరలు\", \"missing_fields\": [\"amount_rupees\"], \"profit_rupees\": null, \"quantity\": 2}, {\"amount_rupees\": 150, \"customer_name\": null, \"customer_name_native\": null, \"intent\": \"expense\", \"item\": \"auto\", \"item_native\": \"ఆటోకి\", \"missing_fields\": [], \"profit_rupees\": null, \"quantity\": null}]}"
+  "content": "{\"lines\": [{\"amount_rupees\": null, \"amount_words\": null, \"customer_name\": null, \"customer_name_native\": null, \"intent\": \"sale\", \"item\": \"sarees\", \"item_native\": \"\\u0c1a\\u0c40\\u0c30\\u0c32\\u0c41\", \"missing_fields\": [\"amount_rupees\"], \"profit_rupees\": null, \"quantity\": 2}, {\"amount_rupees\": 150, \"amount_words\": \"150\", \"customer_name\": null, \"customer_name_native\": null, \"intent\": \"expense\", \"item\": null, \"item_native\": null, \"missing_fields\": [], \"profit_rupees\": null, \"quantity\": null}]}"
 }

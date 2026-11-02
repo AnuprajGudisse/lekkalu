@@ -13,6 +13,8 @@ CUSTOMER_REQUIRED = {"credit_sale", "payment_received"}
 
 class Line(BaseModel):
     intent: Intent
+    # Before amount_rupees so the model writes the words first; checked by numbers_te.parse_amount.
+    amount_words: str | None = None  # the words that state the amount, as written
     # Decimal, never float: rupee amounts parse exactly (only numbers past ~17 digits lose precision).
     amount_rupees: Decimal | None
     profit_rupees: Decimal | None
@@ -49,6 +51,7 @@ _LINE_SCHEMA = {
     "required": list(Line.model_fields),
     "properties": {
         "intent": {"type": "string", "enum": INTENTS},
+        "amount_words": _nullable("string"),
         "amount_rupees": _nullable("number"),
         "profit_rupees": _nullable("number"),
         "quantity": _nullable("integer"),

@@ -1,0 +1,4 @@
+{
+  "input": "పద్మ ఒక చీర తీసుకుంది, డబ్బులు తర్వాత ఇస్తుంది",
+  "content": "{\"lines\": [{\"amount_rupees\": null, \"amount_words\": null, \"customer_name\": \"Padma\", \"customer_name_native\": \"పద్మ\", \"intent\": \"credit_sale\", \"item\": \"saree\", \"item_native\": \"చీర\", \"missing_fields\": [\"amount_rupees\"], \"profit_rupees\": null, \"quantity\": 1}]}"
+}

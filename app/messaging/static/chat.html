@@ -27,6 +27,8 @@
   textarea { flex: 1; resize: none; font: inherit; padding: 10px 12px; border: 1px solid #ccc; border-radius: 20px; max-height: 120px; }
   button { border: 0; border-radius: 50%; width: 48px; height: 48px; font-size: 22px; background: var(--brand); color: #fff; }
   button:disabled { background: #bbb; }
+  button.rec { background: #c62828; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .heard { color: var(--muted); font-size: 15px; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -34,16 +36,19 @@
 <main id="log" aria-live="polite"></main>
 <form id="form">
   <textarea id="text" rows="1" maxlength="1000" placeholder="ఇక్కడ రాయండి…" aria-label="సందేశం"></textarea>
-  <button type="button" id="mic" disabled title="త్వరలో" aria-label="వాయిస్ (త్వరలో)">🎤</button>
+  <button type="button" id="mic" disabled title="వాయిస్ HTTPS లో మాత్రమే" aria-label="వాయిస్">🎤</button>
   <button type="submit" id="send" aria-label="పంపు">➤</button>
 </form>
 <script>
 const slug = location.pathname.split("/")[2];
 const token = new URLSearchParams(location.search).get("t");
 const api = `/api/${slug}/messages`;
-const headers = { "Content-Type": "application/json", ...(token ? { "X-Access-Token": token } : {}) };
+const auth = token ? { "X-Access-Token": token } : {};
+const headers = { "Content-Type": "application/json", ...auth };
 const log = document.getElementById("log");
-const entries = new Map();  // client_message_id -> {id, body, reply_text, sent, rejected}
+const mic = document.getElementById("mic");
+// client_message_id -> {id, kind, body, blob, transcript, reply_text, sent, inflight, rejected}
+const entries = new Map();
 const timeout = () => AbortSignal.timeout(10000);
 
 function uuid() {
@@ -65,8 +70,16 @@ function render() {
   const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   log.replaceChildren();
   for (const e of entries.values()) {
-    log.append(bubble(e.sent ? "me" : "me unsent", e.body));
-    if (e.rejected) log.append(bubble("error", "పంపలేకపోయాను. పేజీ లింక్ సరిచూడండి."));
+    const me = bubble(e.sent ? "me" : "me unsent", e.kind === "audio" ? "🎤 వాయిస్ సందేశం" : e.body);
+    if (e.transcript) {
+      const heard = document.createElement("div");
+      heard.className = "heard";
+      heard.textContent = e.transcript;
+      me.append(heard);
+    }
+    log.append(me);
+    if (e.rejected === 413) log.append(bubble("error", "వాయిస్ చాలా పెద్దది. చిన్నగా మళ్ళీ చెప్పండి."));
+    else if (e.rejected) log.append(bubble("error", "పంపలేకపోయాను. పేజీ లింక్ సరిచూడండి."));
     else log.append(e.reply_text ? bubble("bot", e.reply_text) : bubble("bot wait", "…"));
   }
   if (atBottom) log.scrollTop = log.scrollHeight;
@@ -74,20 +87,35 @@ function render() {
 
 function merge(rows) {
   for (const m of rows) {
-    entries.set(m.client_message_id, { id: m.id, body: m.body, reply_text: m.reply_text, sent: true });
+    entries.set(m.client_message_id, { id: m.id, kind: m.kind, body: m.body, transcript: m.transcript,
+                                       reply_text: m.reply_text, sent: true });
   }
+}
+
+function request(cid, e) {
+  if (e.kind !== "audio") {
+    return [api, { method: "POST", headers, signal: timeout(),
+                   body: JSON.stringify({ client_message_id: cid, text: e.body }) }];
+  }
+  const form = new FormData();
+  form.append("client_message_id", cid);
+  form.append("audio", e.blob, "note");
+  // No JSON Content-Type here: the browser sets the multipart boundary. A phone uplink needs more than 10 s.
+  return [`${api}/audio`, { method: "POST", headers: auth, body: form, signal: AbortSignal.timeout(60000) }];
 }
 
 async function send(cid) {
   const e = entries.get(cid);
+  if (e.inflight) return;  // poll() must not start a second upload of the same note
+  e.inflight = true;
   try {
-    const r = await fetch(api, { method: "POST", headers, signal: timeout(),
-                                 body: JSON.stringify({ client_message_id: cid, text: e.body }) });
-    if (r.status >= 400 && r.status < 500) { e.rejected = true; render(); return; }  // resending won't help
+    const r = await fetch(...request(cid, e));
+    if (r.status >= 400 && r.status < 500) { e.rejected = r.status; render(); return; }  // resending won't help
     if (!r.ok) throw new Error(r.status);
     e.id = (await r.json()).id;
     e.sent = true;
-  } catch { /* network or 5xx: retried by poll() with the same id, so the server never stores it twice */ }
+  } catch { /* network or 5xx: retried by poll() with the same id, so the server never stores it twice */
+  } finally { e.inflight = false; }
   render();
 }
 
@@ -112,6 +140,55 @@ document.getElementById("form").addEventListener("submit", ev => {
   input.value = "";
   render();
   send(cid);
+});
+
+// Voice: tap to start, tap to stop, 60 s at most. The browser allows the mic only on HTTPS or localhost.
+let recorder = null;
+if (navigator.mediaDevices?.getUserMedia && window.MediaRecorder) {
+  mic.disabled = false;
+  mic.title = "వాయిస్ రికార్డ్ చేయండి";
+}
+
+mic.addEventListener("click", async () => {
+  if (recorder) { recorder.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { alert("మైక్ అనుమతి ఇవ్వండి."); return; }
+  const release = () => stream.getTracks().forEach(t => t.stop());  // otherwise iOS keeps the mic indicator on
+  const mimeType = ["audio/webm;codecs=opus", "audio/mp4"].find(t => MediaRecorder.isTypeSupported(t));
+  let rec;
+  try {
+    rec = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 32000 });
+    rec.start();
+  } catch {
+    release();
+    alert("ఈ ఫోన్‌లో రికార్డ్ చేయలేకపోయాను. రాసి పంపండి.");
+    return;
+  }
+  const chunks = [];
+  const started = Date.now();
+  const tick = setInterval(() => {
+    const secs = Math.floor((Date.now() - started) / 1000);
+    mic.textContent = secs;
+    if (secs >= 60 && rec.state === "recording") rec.stop();
+  }, 250);
+  rec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+  rec.onstop = () => {
+    clearInterval(tick);
+    release();
+    recorder = null;
+    mic.classList.remove("rec");
+    mic.textContent = "🎤";
+    const blob = new Blob(chunks, { type: rec.mimeType });
+    if (!blob.size) return;
+    const cid = uuid();
+    entries.set(cid, { id: null, kind: "audio", blob, body: null, transcript: null, reply_text: null, sent: false });
+    render();
+    send(cid);
+  };
+  recorder = rec;
+  mic.classList.add("rec");
+  mic.textContent = "0";
 });
 
 document.getElementById("text").addEventListener("keydown", ev => {

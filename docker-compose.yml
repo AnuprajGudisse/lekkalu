@@ -20,6 +20,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://lekkalu:lekkalu@postgres:5432/lekkalu
     ports: ["8000:8000"]
+    volumes:
+      - ./var:/app/var  # voice notes survive rebuilds; git-ignored
     depends_on:
       postgres:
         condition: service_healthy

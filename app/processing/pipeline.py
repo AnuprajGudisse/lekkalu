@@ -15,14 +15,22 @@ from sqlalchemy.orm import Session
 from app.ai.schemas import CUSTOMER_REQUIRED, TRANSACTION_INTENTS, Extraction, ExtractionError, to_paise
 from app.ai.services import get_extractor
 from app.core import database
+from app.core.config import get_settings
 from app.customers import services as customers
 from app.customers.models import Customer
 from app.ledger import services as ledger
 from app.ledger.rules import derive_cost
 from app.messaging import templates_te as t
 from app.messaging.models import Message
+from app.speech import audio
+from app.speech.numbers_te import parse_amount
+from app.speech.services import get_transcriber
 
 log = logging.getLogger(__name__)
+
+# ponytail: item words only; customer names made recognition worse on the Phase 0 clips (spikes/RESULTS.md).
+# Add them if real recordings show keywords help.
+ITEM_KEYWORDS = ["చీర", "saree", "పట్టు", "కాటన్"]
 
 # ponytail: in-process locks assume one Uvicorn worker; use a Postgres advisory lock for more.
 _locks: dict[int, threading.Lock] = {}
@@ -71,16 +79,32 @@ def recover() -> list[int]:
 
 
 def process_message(message_id: int) -> None:
-    extractor = None
+    providers = []  # the models this reply depends on, for the [MOCK] label
     try:
         with database.SessionLocal() as s:
-            body = s.get(Message, message_id).body
+            msg = s.get(Message, message_id)
+            kind, text, audio_path, transcript = msg.kind, msg.body, msg.audio_path, msg.transcript_te
+        if kind == "audio":
+            if transcript is None:  # already set after a restart: speech-to-text is not paid for twice
+                settings = get_settings()
+                transcriber = get_transcriber()
+                providers.append(transcriber)
+                keywords = ITEM_KEYWORDS if settings.stt_keywords else []
+                transcript = transcriber.transcribe(audio.to_wav(settings.audio_dir / audio_path), keywords)
+                with database.SessionLocal() as s, s.begin():  # own commit: the chat shows it early
+                    s.get(Message, message_id).transcript_te = transcript
+            text = transcript
+        if not (text or "").strip():  # silence, or an empty transcript saved before a restart
+            with database.SessionLocal() as s, s.begin():
+                _finish(s.get(Message, message_id), t.NOT_UNDERSTOOD, "done", providers)
+            return
         extractor = get_extractor()
-        extraction = extractor.extract(body)  # model call holds no DB transaction
+        providers.append(extractor)
+        extraction = extractor.extract(text)  # model calls hold no DB transaction
         with database.SessionLocal() as s, s.begin():
             msg = s.get(Message, message_id)
             msg.extraction = extraction.model_dump(mode="json")
-            _finish(msg, route(s, msg, extraction), "done", extractor)
+            _finish(msg, route(s, msg, extraction), "done", providers)
     except Exception as e:
         log.exception("message %s failed", message_id)
         # If the database itself is down this write fails too; the message stays `processing`
@@ -88,11 +112,12 @@ def process_message(message_id: int) -> None:
         with database.SessionLocal() as s, s.begin():
             msg = s.get(Message, message_id)
             msg.error = f"{type(e).__name__}: {e}"[:2000]
-            _finish(msg, t.SEND_AGAIN, "failed", extractor)
+            _finish(msg, t.SEND_AGAIN, "failed", providers)
 
 
-def _finish(msg: Message, reply: str, status: str, extractor) -> None:
-    msg.reply_text = f"[MOCK] {reply}" if getattr(extractor, "is_mock", False) else reply
+def _finish(msg: Message, reply: str, status: str, providers: list) -> None:
+    mock = any(getattr(p, "is_mock", False) for p in providers)
+    msg.reply_text = f"[MOCK] {reply}" if mock else reply
     msg.replied_at = datetime.now(UTC)
     msg.status = status
 
@@ -119,6 +144,12 @@ def route(s: Session, msg: Message, extraction: Extraction) -> str:
             cost = derive_cost(amount, profit)
     except (ExtractionError, ValueError):  # zero, negative or fractional paise; profit above amount
         return t.ASK_AMOUNT  # resending the same words would fail again, so ask instead
+    # The model's number counts only if the words it quotes say the same amount; neither is trusted alone.
+    # ponytail: profit is not cross-checked; add the same check if a wrong profit shows up.
+    if (parsed := parse_amount(line.amount_words)) != amount:
+        log.warning("message %s: amount not confirmed (model=%s paise, words=%r, parsed=%s)",
+                    msg.id, amount, line.amount_words, parsed)
+        return t.ASK_AMOUNT_UNCLEAR
 
     customer = None
     if line.intent in CUSTOMER_REQUIRED | {"sale"} and (line.customer_name or line.customer_name_native):

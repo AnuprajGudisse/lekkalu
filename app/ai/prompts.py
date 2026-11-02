@@ -8,6 +8,8 @@ EXTRACTION_SYSTEM = (
     "Return one entry in lines for each separate transaction in the message; a question, correction or "
     "anything else is a single line with that intent. "
     "amount_rupees is the total money of that transaction as a number; for a correction it is the corrected amount. "
+    "amount_words is only the words of the message that state amount_rupees, copied exactly as written, "
+    "including repeated or misspelled words; do not convert them to digits; null if no amount is stated. "
     "profit_rupees only if the owner states it. "
     "customer_name is the customer's name in English (Latin) letters; customer_name_native is the name exactly as "
     "written in the message. item is the item in English; item_native is the item as written in the message. "

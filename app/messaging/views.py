@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ router = APIRouter()
 CHAT_PAGE = Path(__file__).parent / "static" / "chat.html"
 Db = Annotated[Session, Depends(get_session)]
 Token = Annotated[str | None, Header(alias="X-Access-Token")]
+MAX_AUDIO_BYTES = 5_000_000  # a 60 s note at 32 kbps is ~240 KB; Safari AAC at default bitrate stays under this
 
 
 class NewMessage(BaseModel):
@@ -49,11 +50,32 @@ def post_message(slug: str, body: NewMessage, background: BackgroundTasks, sessi
     return {"id": msg.id}
 
 
+@router.post("/api/{slug}/messages/audio", status_code=202)
+def post_audio(slug: str, client_message_id: Annotated[UUID, Form()], audio: UploadFile,
+               background: BackgroundTasks, session: Db, token: Token = None):
+    b = _business(session, slug, token)
+    # No content-type check: browsers send audio/webm, audio/mp4, video/mp4 or nothing; ffmpeg rejects non-audio.
+    data = audio.file.read(MAX_AUDIO_BYTES + 1)
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(413)
+    if not data:
+        raise HTTPException(422, "empty audio")
+    cid = str(client_message_id)
+    try:
+        msg = services.store_message(session, business_id=b.id, client_message_id=cid,
+                                     audio_path=services.save_audio(b.id, cid, data))
+    except services.MessageConflict:
+        raise HTTPException(409) from None
+    session.commit()
+    background.add_task(pipeline.process_business, b.id)
+    return {"id": msg.id}
+
+
 @router.get("/api/{slug}/messages")
 def get_messages(slug: str, session: Db, token: Token = None, after: int | None = None):
     b = _business(session, slug, token)
     return [
-        {"id": m.id, "client_message_id": m.external_message_id, "body": m.body, "status": m.status,
-         "reply_text": m.reply_text}
+        {"id": m.id, "client_message_id": m.external_message_id, "kind": m.kind, "body": m.body,
+         "transcript": m.transcript_te, "status": m.status, "reply_text": m.reply_text}
         for m in services.list_messages(session, business_id=b.id, after=after)
     ]

@@ -1,10 +1,12 @@
 # Copyright (c) 2026 Lekkalu
+import os
 import secrets
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.models import Business
 from app.messaging.models import Message
 
@@ -22,12 +24,29 @@ def resolve_business(session: Session, slug: str, token: str | None) -> Business
     return None
 
 
-def store_message(session: Session, *, business_id: int, client_message_id: str, text: str) -> Message:
+def save_audio(business_id: int, client_message_id: str, data: bytes) -> str:
+    """Store a voice note; returns its path relative to the audio directory.
+
+    The name is the client's UUID, so a resend finds the file already there. A new file appears whole or
+    not at all (`.part`, then rename), so a resend can never truncate a file ffmpeg is reading.
+    """
+    rel = f"{business_id}/{client_message_id}.audio"  # ffmpeg detects the format from the content
+    path = get_settings().audio_dir / rel
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_suffix(".part")
+        part.write_bytes(data)
+        os.replace(part, path)
+    return rel
+
+
+def store_message(session: Session, *, business_id: int, client_message_id: str, text: str | None = None,
+                  audio_path: str | None = None) -> Message:
     """Insert once per (channel, client id); a resend returns the stored message."""
     session.execute(
         insert(Message)
         .values(business_id=business_id, channel="web", external_message_id=client_message_id,
-                received_at=func.now(), kind="text", body=text)
+                received_at=func.now(), kind="audio" if audio_path else "text", body=text, audio_path=audio_path)
         .on_conflict_do_nothing(index_elements=["channel", "external_message_id"])
     )
     msg = session.scalars(

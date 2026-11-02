@@ -88,7 +88,7 @@ def make_message(session: Session, business: Business, *, received_at: datetime 
         channel=kw.pop("channel", "web"),
         external_message_id=kw.pop("external_message_id", uuid4().hex),
         received_at=received_at or datetime.now(UTC),
-        kind="text",
+        kind=kw.pop("kind", "text"),
         body=kw.pop("body", "test"),
         **kw,
     )

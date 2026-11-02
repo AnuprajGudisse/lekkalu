@@ -7,11 +7,15 @@ from sqlalchemy import func, select
 
 from app.ai.providers.mock import MockExtractor
 from app.ai.schemas import Extraction, Line
+from app.core.config import get_settings
 from app.customers import services as customers
 from app.ledger.models import Transaction
 from app.main import app
+from app.messaging import views
 from app.messaging.models import Message
 from app.processing import pipeline
+from app.speech import audio
+from app.speech.providers.mock import MockTranscriber
 from tests.conftest import make_business
 
 client = TestClient(app)  # no `with`: lifespan recovery stays out of API tests
@@ -22,7 +26,7 @@ TEXT = "లక్ష్మి రెండు చీరలు తీసుకు
 def demo(session, db, monkeypatch):
     shop = make_business(session, public=True)
     customers.create(session, business_id=shop.id, name="Lakshmi", name_native="లక్ష్మి")
-    credit = Line(intent="credit_sale", amount_rupees=2500, profit_rupees=None, quantity=2, item="saree",
+    credit = Line(intent="credit_sale", amount_rupees=2500, amount_words="రెండు వేల ఐదు వందలు", profit_rupees=None, quantity=2, item="saree",
                   item_native="చీరలు", customer_name="Lakshmi", customer_name_native="లక్ష్మి", missing_fields=[])
     monkeypatch.setattr(pipeline, "get_extractor", lambda: MockExtractor({TEXT: Extraction(lines=[credit])}))
     return shop
@@ -81,3 +85,59 @@ def test_messages_list_only_shows_own_business(session, demo):
     other = make_business(session, public=True)
     client.post(f"/api/{demo.slug}/messages", json={"client_message_id": str(uuid4()), "text": TEXT})
     assert client.get(f"/api/{other.slug}/messages").json() == []
+
+
+# --- voice notes ---
+
+@pytest.fixture
+def voice(demo, tmp_path, monkeypatch):
+    """Audio lands in tmp_path; ffmpeg and Muse Voice Transcribe are replaced; the transcript is TEXT."""
+    monkeypatch.setattr(get_settings(), "audio_dir", tmp_path)
+    monkeypatch.setattr(audio, "to_wav", lambda path: path.read_bytes())
+    monkeypatch.setattr(pipeline, "get_transcriber", lambda: MockTranscriber(TEXT))
+    return tmp_path
+
+
+def post_audio(slug, cid, data=b"webm-bytes", **kw):
+    return client.post(f"/api/{slug}/messages/audio", data={"client_message_id": cid},
+                       files={"audio": ("note.webm", data, "audio/webm;codecs=opus")}, **kw)
+
+
+def test_same_voice_note_twice_stores_one_message_one_file_and_one_transaction(session, demo, voice):
+    cid = str(uuid4())
+    first, second = post_audio(demo.slug, cid), post_audio(demo.slug, cid)
+    assert (first.status_code, second.status_code) == (202, 202)
+    assert first.json() == second.json()
+    assert count(session, Message, demo) == 1
+    assert count(session, Transaction, demo) == 1
+    assert [p.name for p in voice.rglob("*") if p.is_file()] == [f"{cid}.audio"]  # no .part left behind
+
+    [m] = client.get(f"/api/{demo.slug}/messages").json()
+    assert (m["kind"], m["body"], m["transcript"], m["status"]) == ("audio", None, TEXT, "done")
+    assert "₹2,500" in m["reply_text"]
+
+
+def test_voice_note_for_private_business_needs_its_token(session, db, voice):
+    shop = make_business(session, access_token="secret-token")
+    assert post_audio(shop.slug, str(uuid4())).status_code == 404
+    assert post_audio(shop.slug, str(uuid4()), headers={"X-Access-Token": "secret-token"}).status_code == 202
+
+
+def test_oversized_voice_note_is_refused_and_not_stored(session, demo, voice):
+    big = b"x" * (views.MAX_AUDIO_BYTES + 1)
+    assert post_audio(demo.slug, str(uuid4()), big).status_code == 413
+    assert count(session, Message, demo) == 0
+    assert not any(voice.rglob("*.audio"))
+
+
+def test_empty_voice_note_is_refused(session, demo, voice):
+    assert post_audio(demo.slug, str(uuid4()), b"").status_code == 422
+    assert count(session, Message, demo) == 0
+
+
+def test_voice_note_id_already_used_by_another_business_conflicts(session, demo, voice):
+    other = make_business(session, public=True)
+    cid = str(uuid4())
+    assert post_audio(demo.slug, cid).status_code == 202
+    assert post_audio(other.slug, cid).status_code == 409
+    assert count(session, Message, other) == 0
